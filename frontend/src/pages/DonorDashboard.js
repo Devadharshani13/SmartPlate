@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { UtensilsCrossed, LogOut, Filter, Search, MapPin, Users, Package, Clock, AlertCircle } from 'lucide-react';
@@ -42,11 +42,7 @@ export default function DonorDashboard({ user, onLogout }) {
     food_condition: 'excellent'
   });
 
-  useEffect(() => {
-    fetchData();
-  }, [activeTab]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       if (activeTab === 'available') {
@@ -61,7 +57,11 @@ export default function DonorDashboard({ user, onLogout }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const handleAcceptRequest = (request) => {
     setSelectedRequest(request);
