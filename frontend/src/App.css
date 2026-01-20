@@ -1,0 +1,37 @@
+.App {
+  min-height: 100vh;
+}
+
+.card-hover {
+  transition: all 0.3s ease-out;
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+.btn-primary {
+  background: #1A4D2E;
+  transition: all 0.3s ease-out;
+}
+
+.btn-primary:hover {
+  background: #143d24;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgba(26, 77, 46, 0.3);
+}
+
+.btn-primary:active {
+  transform: scale(0.98);
+}
+
+.status-badge {
+  transition: all 0.2s ease-out;
+}
+
+.glassmorphism {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(228, 228, 231, 0.5);
+}
