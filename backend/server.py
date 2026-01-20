@@ -694,6 +694,36 @@ async def get_trends(current_user: dict = Depends(get_current_user)):
     
     return {"trends": list(trends.values())}
 
+@app.get("/")
+async def root():
+    return {
+        "message": "SmartPlate API is running",
+        "version": "1.0.0",
+        "status": "healthy",
+        "endpoints": {
+            "api": "/api",
+            "health": "/health",
+            "docs": "/docs"
+        }
+    }
+
+@app.get("/health")
+async def health_check():
+    try:
+        await db.command('ping')
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "database": "disconnected",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
 app.include_router(api_router)
 
 app.add_middleware(
