@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { UtensilsCrossed, LogOut, Shield, CheckCircle, XCircle, Users, FileText, Activity } from 'lucide-react';
@@ -17,11 +17,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('verifications');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchData();
-  }, [activeTab]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       if (activeTab === 'verifications') {
@@ -39,7 +35,11 @@ export default function AdminDashboard({ user, onLogout }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const handleVerification = async (userId, action, notes = '') => {
     try {
