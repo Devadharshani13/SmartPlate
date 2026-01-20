@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
 
-  "engines": {
-    "node": "18.x"
-  },
+ "engines": {
+  "node": "20.x",
+  "npm": "10.x"
+},
 
   "dependencies": {
     "@hookform/resolvers": "^5.0.1",
@@ -99,3 +100,4 @@
 
   "packageManager": "yarn@1.22.22"
 }
+
