@@ -1,0 +1,186 @@
+{
+  "identity": {
+    "name": "SmartPlate Design System",
+    "archetype": "Organic & Earthy (Trust, Growth, Calm)",
+    "vibe": "Empathetic, Efficient, Transparent, Urgent (but controlled)",
+    "principles": [
+      "Fusion over Imitation: Mix NGO warmth with Logistics precision.",
+      "Emotion First: Every pixel builds trust.",
+      "Content is King: Data tells a story of impact.",
+      "Zoom In: Focus on the human element (food, faces).",
+      "Negative Space: Let the mission breathe."
+    ]
+  },
+  "typography": {
+    "headings": {
+      "family": "Manrope, sans-serif",
+      "weights": ["600", "700", "800"],
+      "usage": "Use for all section headers, card titles, and hero text. Manrope bridges the gap between modern tech and human friendliness.",
+      "letterSpacing": "tracking-tight"
+    },
+    "body": {
+      "family": "Inter, sans-serif",
+      "weights": ["400", "500"],
+      "usage": "Use for all data tables, descriptions, and inputs. Optimized for legibility at small sizes.",
+      "letterSpacing": "tracking-normal"
+    },
+    "mono": {
+      "family": "JetBrains Mono, monospace",
+      "usage": "Use for tracking IDs, logistics codes, and raw data metrics."
+    }
+  },
+  "colors": {
+    "theme": "light",
+    "palette": {
+      "primary": {
+        "name": "Forest Green",
+        "hex": "#1A4D2E",
+        "tailwind": "bg-[#1A4D2E] text-white",
+        "usage": "Primary buttons, active states, key branding elements. Represents growth and trust."
+      },
+      "secondary": {
+        "name": "Terracotta",
+        "hex": "#E07A5F",
+        "tailwind": "bg-[#E07A5F] text-white",
+        "usage": "Urgent actions (Donate Now), alerts, 'Needs Attention' statuses."
+      },
+      "background": {
+        "name": "Warm Bone",
+        "hex": "#F9F7F2",
+        "tailwind": "bg-[#F9F7F2]",
+        "usage": "Global app background. Avoids the sterility of pure white."
+      },
+      "surface": {
+        "name": "Pure White",
+        "hex": "#FFFFFF",
+        "tailwind": "bg-white",
+        "usage": "Cards, modals, inputs. Creates depth against the Warm Bone background."
+      },
+      "text": {
+        "primary": "#1F2937",
+        "secondary": "#4B5563",
+        "muted": "#9CA3AF"
+      },
+      "status": {
+        "success": "#10B981",
+        "warning": "#F59E0B",
+        "error": "#EF4444",
+        "info": "#3B82F6"
+      }
+    }
+  },
+  "layout": {
+    "spacing_scale": "Generous (2x standard). Use p-6, p-8, p-12 for containers.",
+    "grid_system": {
+      "marketing": {
+        "mode": "Tetris Grid",
+        "cols": "grid-cols-1 md:grid-cols-12",
+        "gap": "gap-8",
+        "rules": "Asymmetry is key. Mix col-span-8 (Hero) with col-span-4 (Detail)."
+      },
+      "dashboard": {
+        "mode": "High Density Bento",
+        "cols": "grid-cols-1 md:grid-cols-4",
+        "gap": "gap-6",
+        "rules": "Fill every pixel. Use row-span-2 for tall lists. Ensure alignment."
+      }
+    },
+    "container": {
+      "maxWidth": "max-w-7xl",
+      "padding": "px-4 sm:px-6 lg:px-8",
+      "center": true
+    }
+  },
+  "components": {
+    "cards": {
+      "style": "Soft Utility",
+      "classes": "bg-white rounded-xl border border-stone-200 shadow-sm hover:shadow-md transition-all duration-200",
+      "padding": "p-6"
+    },
+    "buttons": {
+      "primary": "bg-[#1A4D2E] hover:bg-[#143d24] text-white rounded-full px-8 py-3 font-semibold shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5",
+      "secondary": "bg-white border-2 border-[#1A4D2E] text-[#1A4D2E] hover:bg-stone-50 rounded-full px-8 py-3 font-semibold transition-all",
+      "ghost": "text-stone-600 hover:text-[#1A4D2E] hover:bg-stone-100 rounded-lg px-4 py-2 transition-all"
+    },
+    "inputs": {
+      "style": "bg-white border-stone-200 focus:border-[#1A4D2E] focus:ring-[#1A4D2E] rounded-lg"
+    },
+    "navigation": {
+      "style": "Glassmorphism",
+      "classes": "bg-white/80 backdrop-blur-md border-b border-stone-200/50 sticky top-0 z-50"
+    }
+  },
+  "visual_enhancers": {
+    "shadows": "Soft, diffuse shadows (shadow-sm, shadow-md). Avoid harsh black shadows.",
+    "borders": "Subtle 1px borders in stone-200. Use for definition, not decoration.",
+    "radius": "rounded-xl for cards, rounded-full for buttons, rounded-lg for inputs.",
+    "glassmorphism": "Use sparingly on sticky headers and toast notifications.",
+    "gradients": "NO full-screen gradients. Use subtle mesh gradients in hero backgrounds only."
+  },
+  "motion": {
+    "transitions": "transition-all duration-300 ease-out",
+    "hover_effects": "Lift up (-translate-y-1) on cards. Color shift on buttons.",
+    "loading": "Skeleton loaders with a shimmer effect (animate-pulse).",
+    "micro_interactions": "Scale down (0.98) on button press."
+  },
+  "images": {
+    "hero": {
+      "url": "https://images.unsplash.com/photo-1639432047673-91ea142f9cf5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHw0fHxjb21tdW5pdHklMjBraXRjaGVuJTIwc2VydmluZyUyMGZvb2R8ZW58MHx8fHwxNzY4ODM2NDI0fDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Community gathering around food",
+      "usage": "Main landing page hero background or side image."
+    },
+    "food_surplus": {
+      "url": "https://images.unsplash.com/photo-1757332051150-a5b3c4510af8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzV8MHwxfHNlYXJjaHwxfHxmcmVzaCUyMGhlYWx0aHklMjBmb29kJTIwdmVnZXRhYmxlc3xlbnwwfHx8fDE3Njg4MzY0MjF8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Fresh vegetables and healthy food",
+      "usage": "Donation cards, food category headers."
+    },
+    "volunteer": {
+      "url": "https://images.unsplash.com/photo-1659353739926-4c7df1a645a6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzh8MHwxfHNlYXJjaHw0fHx2b2x1bnRlZXIlMjBkZWxpdmVyaW5nJTIwZm9vZCUyMGJveCUyMGhhcHB5fGVufDB8fHx8MTc2ODgzNjQyM3ww&ixlib=rb-4.1.0&q=85",
+      "alt": "Volunteer delivering food box",
+      "usage": "Volunteer dashboard, success states."
+    },
+    "community": {
+      "url": "https://images.unsplash.com/photo-1595506417208-6b298a3537b7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHwzfHxjb21tdW5pdHklMjBraXRjaGVuJTIwc2VydmluZyUyMGZvb2R8ZW58MHx8fHwxNzY4ODM2NDI0fDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Women serving food in community kitchen",
+      "usage": "About us, Impact section."
+    }
+  },
+  "icons": {
+    "library": "lucide-react",
+    "style": "Stroke width 1.5px or 2px. Rounded line caps.",
+    "usage": "Use consistent sizing (w-5 h-5 for buttons, w-6 h-6 for nav)."
+  },
+  "accessibility": {
+    "contrast": "Ensure 4.5:1 contrast ratio for text. Use dark charcoal on warm bone.",
+    "focus_states": "Visible ring-2 ring-offset-2 ring-[#1A4D2E] on all interactive elements.",
+    "aria": "Use aria-labels for icon-only buttons."
+  },
+  "instructions_to_main_agent": [
+    "1. INSTALL FONTS: Add Manrope and JetBrains Mono via Google Fonts in index.html or CSS.",
+    "2. CONFIGURE TAILWIND: Update tailwind.config.js to include the custom colors (Forest Green, Terracotta, Warm Bone).",
+    "3. OVERRIDE SHADCN: Customize the default Shadcn components to match the 'Soft Utility' style (rounded-xl, soft shadows).",
+    "4. BUILD LAYOUTS: Use the Bento Grid system for the dashboards. Do not use simple columns.",
+    "5. USE IMAGES: Use the provided Unsplash URLs for placeholders. Do not use gray boxes.",
+    "6. DATA-TESTID: Add data-testid to all interactive elements."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur).",
+    "You MUST NOT apply universal transition. Eg: transition: all. This results in breaking transforms. Always add transitions for specific interactive elements like button, input excluding transforms.",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file. This disrupts the human natural reading flow of text.",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations & color relevant to the app style.",
+    "NEVER: use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯📚🎭🎬🎪🎉🎊🎁🎀🎂🍰🎈🎨🎰💰💵💳🏦💎🪙💸🤑📊📈📉💹🔢🏆🥇 etc for icons.",
+    "Every interaction needs micro-animations - hover states, transitions, parallax effects, and entrance animations. Static = dead.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Subtle grain textures, noise overlays, custom cursors, selection states, and loading animations: separates good from extraordinary.",
+    "Main agent relies on these image URLs. Missing categories (especially sponsor logos) = main agent will use placeholder text which is FORBIDDEN.",
+    "Prioritize using pre-existing components from src/components/ui when applicable.",
+    "Create new components that match the style and conventions of existing components when needed.",
+    "Examine existing components to understand the project's component patterns before creating new ones.",
+    "Components MUST use named exports (export const ComponentName = ...).",
+    "Pages MUST use default exports (export default function PageName() {...}).",
+    "Use sonner for toasts. Sonner component are located in /app/src/components/ui/sonner.tsx."
+  ]
+}
