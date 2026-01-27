@@ -92,13 +92,14 @@ async def log_audit(action: str, user_id: str, details: dict):
     }
     await db.audit_logs.insert_one(audit_log)
 
+# Pydantic Models
 class UserRegister(BaseModel):
     email: EmailStr
     password: str
     name: str
     role: str
     location: str
-    phone: str  # Now required
+    phone: str
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     transport_mode: Optional[str] = None
@@ -113,7 +114,36 @@ class UserRegister(BaseModel):
             raise ValueError(result)
         return result
     
-    # Google OAuth Models
+    @validator('password')
+    def validate_password_field(cls, v):
+        is_valid, error = validate_password_strength(v)
+        if not is_valid:
+            raise ValueError(error)
+        return v
+    
+    @validator('location')
+    def validate_location_field(cls, v):
+        is_valid, result = validate_location(v)
+        if not is_valid:
+            raise ValueError(result)
+        return result
+    
+    @validator('latitude')
+    def validate_lat(cls, v):
+        if v is not None:
+            is_valid, error = validate_latitude(v)
+            if not is_valid:
+                raise ValueError(error)
+        return v
+    
+    @validator('longitude')
+    def validate_lng(cls, v):
+        if v is not None:
+            is_valid, error = validate_longitude(v)
+            if not is_valid:
+                raise ValueError(error)
+        return v
+
 class GoogleCallbackData(BaseModel):
     code: str
     role: str
@@ -122,6 +152,142 @@ class GoogleCallbackData(BaseModel):
     organization: Optional[str] = None
     donor_type: Optional[str] = None
     transport_mode: Optional[str] = None
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class User(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    user_id: str
+    email: str
+    name: str
+    role: str
+    location: str
+    phone: Optional[str] = None
+    transport_mode: Optional[str] = None
+    organization: Optional[str] = None
+    donor_type: Optional[str] = None
+    verification_status: Optional[str] = None
+    created_at: str
+
+class FoodRequestCreate(BaseModel):
+    food_type: str
+    food_category: str
+    quantity: int
+    quantity_unit: str
+    required_date: str
+    required_time: str
+    pickup_location: str
+    special_instructions: Optional[str] = None
+    people_count: int
+
+class FoodRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    request_id: str
+    ngo_id: str
+    ngo_name: str
+    ngo_organization: str
+    food_type: str
+    food_category: str
+    quantity: int
+    quantity_unit: str
+    required_date: str
+    required_time: str
+    pickup_location: str
+    special_instructions: Optional[str] = None
+    people_count: int
+    urgency_score: float
+    status: str
+    created_at: str
+    donor_id: Optional[str] = None
+    donor_name: Optional[str] = None
+    volunteer_id: Optional[str] = None
+    volunteer_name: Optional[str] = None
+    co_volunteer_id: Optional[str] = None
+    co_volunteer_name: Optional[str] = None
+    delivery_photo: Optional[str] = None
+
+class DonationAccept(BaseModel):
+    request_id: str
+    availability_time: str
+    food_condition: str
+    can_deliver_self: bool = False
+
+class PhotoProof(BaseModel):
+    image_base64: str
+    latitude: float
+    longitude: float
+    timestamp: Optional[str] = None
+
+class DeliveryTaskAccept(BaseModel):
+    request_id: str
+
+class DeliveryStatusUpdate(BaseModel):
+    request_id: str
+    status: str
+    extra_volunteer_required: Optional[bool] = False
+    extra_volunteer_reason: Optional[str] = None
+    delivery_photo: Optional[str] = None
+
+class ConfirmReceipt(BaseModel):
+    request_id: str
+    rating: Optional[int] = None
+    feedback: Optional[str] = None
+
+class VerificationAction(BaseModel):
+    user_id: str
+    action: str
+    notes: Optional[str] = None
+
+# Utility Functions
+def calculate_urgency_score(quantity: int, people_count: int, required_datetime_str: str, ngo_history: dict = None) -> float:
+    try:
+        required_dt = datetime.fromisoformat(required_datetime_str)
+        time_diff = (required_dt - datetime.now(timezone.utc)).total_seconds() / 3600
+        
+        time_score = max(0, min(10, 10 - (time_diff / 24) * 2))
+        quantity_score = min(10, (people_count / 100) * 10)
+        
+        history_score = 5.0
+        if ngo_history:
+            reliability = ngo_history.get('reliability_score', 5.0)
+            history_score = min(10, reliability)
+        
+        urgency = (time_score * 0.5 + quantity_score * 0.3 + history_score * 0.2)
+        return round(urgency, 2)
+    except:
+        return 5.0
+
+def calculate_distance(loc1: str, loc2: str) -> float:
+    return abs(hash(loc1) - hash(loc2)) % 50
+
+def get_volunteer_capacity_score(transport_mode: str, distance: float, quantity: int) -> float:
+    capacity_map = {"van": 10, "car": 7, "two_wheeler": 5, "bicycle": 3, "on_foot": 2}
+    capacity = capacity_map.get(transport_mode, 5)
+    distance_penalty = min(distance / 10, 3)
+    quantity_penalty = max(0, (quantity - 50) / 20)
+    return capacity - distance_penalty - quantity_penalty
+
+def should_auto_trigger_extra_volunteer(quantity: int, distance: float, transport_mode: str) -> tuple:
+    capacity_score = get_volunteer_capacity_score(transport_mode, distance, quantity)
+    if capacity_score < 2:
+        if quantity > 100:
+            return True, "heavy_load"
+        elif distance > 30:
+            return True, "long_distance"
+        else:
+            return True, "capacity_constraint"
+    return False, None
+
+# Socket.IO Events
+@sio.event
+async def connect(sid, environ):
+    print(f"Client connected: {sid}")
+
+@sio.event
+async def disconnect(sid):
+    print(f"Client disconnected: {sid}")
 
 # Google OAuth Endpoints
 @api_router.get("/auth/google/login")
@@ -207,171 +373,8 @@ async def google_callback(callback_data: GoogleCallbackData):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Google authentication failed: {str(e)}")
-        
-    @validator('password')
-    def validate_password_field(cls, v):
-        is_valid, error = validate_password_strength(v)
-        if not is_valid:
-            raise ValueError(error)
-        return v
-    
-    @validator('location')
-    def validate_location_field(cls, v):
-        is_valid, result = validate_location(v)
-        if not is_valid:
-            raise ValueError(result)
-        return result
-    
-    @validator('latitude')
-    def validate_lat(cls, v):
-        if v is not None:
-            is_valid, error = validate_latitude(v)
-            if not is_valid:
-                raise ValueError(error)
-        return v
-    
-    @validator('longitude')
-    def validate_lng(cls, v):
-        if v is not None:
-            is_valid, error = validate_longitude(v)
-            if not is_valid:
-                raise ValueError(error)
-        return v
 
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
-class User(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    user_id: str
-    email: str
-    name: str
-    role: str
-    location: str
-    phone: Optional[str] = None
-    transport_mode: Optional[str] = None
-    organization: Optional[str] = None
-    donor_type: Optional[str] = None
-    verification_status: Optional[str] = None
-    created_at: str
-
-class FoodRequestCreate(BaseModel):
-    food_type: str
-    food_category: str
-    quantity: int
-    quantity_unit: str
-    required_date: str
-    required_time: str
-    pickup_location: str
-    special_instructions: Optional[str] = None
-    people_count: int
-
-class FoodRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    request_id: str
-    ngo_id: str
-    ngo_name: str
-    ngo_organization: str
-    food_type: str
-    food_category: str
-    quantity: int
-    quantity_unit: str
-    required_date: str
-    required_time: str
-    pickup_location: str
-    special_instructions: Optional[str] = None
-    people_count: int
-    urgency_score: float
-    status: str
-    created_at: str
-    donor_id: Optional[str] = None
-    donor_name: Optional[str] = None
-    volunteer_id: Optional[str] = None
-    volunteer_name: Optional[str] = None
-    co_volunteer_id: Optional[str] = None
-    co_volunteer_name: Optional[str] = None
-    delivery_photo: Optional[str] = None
-
-class DonationAccept(BaseModel):
-    request_id: str
-    availability_time: str
-    food_condition: str
-    can_deliver_self: bool = False  # NEW: Can donor deliver themselves?
-
-class PhotoProof(BaseModel):
-    image_base64: str
-    latitude: float
-    longitude: float
-    timestamp: Optional[str] = None
-
-class DeliveryTaskAccept(BaseModel):
-    request_id: str
-
-class DeliveryStatusUpdate(BaseModel):
-    request_id: str
-    status: str
-    extra_volunteer_required: Optional[bool] = False
-    extra_volunteer_reason: Optional[str] = None
-    delivery_photo: Optional[str] = None
-
-class ConfirmReceipt(BaseModel):
-    request_id: str
-    rating: Optional[int] = None
-    feedback: Optional[str] = None
-
-class VerificationAction(BaseModel):
-    user_id: str
-    action: str
-    notes: Optional[str] = None
-
-def calculate_urgency_score(quantity: int, people_count: int, required_datetime_str: str, ngo_history: dict = None) -> float:
-    try:
-        required_dt = datetime.fromisoformat(required_datetime_str)
-        time_diff = (required_dt - datetime.now(timezone.utc)).total_seconds() / 3600
-        
-        time_score = max(0, min(10, 10 - (time_diff / 24) * 2))
-        quantity_score = min(10, (people_count / 100) * 10)
-        
-        history_score = 5.0
-        if ngo_history:
-            reliability = ngo_history.get('reliability_score', 5.0)
-            history_score = min(10, reliability)
-        
-        urgency = (time_score * 0.5 + quantity_score * 0.3 + history_score * 0.2)
-        return round(urgency, 2)
-    except:
-        return 5.0
-
-def calculate_distance(loc1: str, loc2: str) -> float:
-    return abs(hash(loc1) - hash(loc2)) % 50
-
-def get_volunteer_capacity_score(transport_mode: str, distance: float, quantity: int) -> float:
-    capacity_map = {"van": 10, "car": 7, "two_wheeler": 5, "bicycle": 3, "on_foot": 2}
-    capacity = capacity_map.get(transport_mode, 5)
-    distance_penalty = min(distance / 10, 3)
-    quantity_penalty = max(0, (quantity - 50) / 20)
-    return capacity - distance_penalty - quantity_penalty
-
-def should_auto_trigger_extra_volunteer(quantity: int, distance: float, transport_mode: str) -> tuple:
-    capacity_score = get_volunteer_capacity_score(transport_mode, distance, quantity)
-    if capacity_score < 2:
-        if quantity > 100:
-            return True, "heavy_load"
-        elif distance > 30:
-            return True, "long_distance"
-        else:
-            return True, "capacity_constraint"
-    return False, None
-
-@sio.event
-async def connect(sid, environ):
-    print(f"Client connected: {sid}")
-
-@sio.event
-async def disconnect(sid):
-    print(f"Client disconnected: {sid}")
-
+# Authentication Endpoints
 @api_router.post("/auth/register")
 async def register(user_data: UserRegister):
     existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
@@ -411,8 +414,10 @@ async def register(user_data: UserRegister):
         user_doc["total_donations"] = 0
     
     await db.users.insert_one(user_doc)
-     # Send welcome email
+    
+    # Send welcome email
     await send_welcome_email(user_data.email, user_data.name, user_data.role)
+    
     await log_audit("USER_REGISTERED", user_id, {"role": user_data.role, "email": user_data.email})
     
     token = create_access_token({"sub": user_id, "role": user_data.role})
@@ -433,6 +438,7 @@ async def login(credentials: UserLogin):
 async def get_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
+# NGO Endpoints
 @api_router.post("/ngo/upload-verification")
 async def upload_verification_document(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     if current_user["role"] != "ngo":
@@ -577,6 +583,7 @@ async def confirm_receipt(data: ConfirmReceipt, current_user: dict = Depends(get
     
     return {"message": "Receipt confirmed successfully"}
 
+# Donor Endpoints
 @api_router.get("/donor/requests", response_model=List[FoodRequest])
 async def get_available_requests(current_user: dict = Depends(get_current_user)):
     if current_user["role"] != "donor":
@@ -609,16 +616,6 @@ async def accept_donation(data: DonationAccept, current_user: dict = Depends(get
     )
     
     await db.users.update_one({"user_id": current_user["user_id"]}, {"$inc": {"total_donations": 1}})
-
-    # Send approval email if verified
-    if data.action == "verified":
-        ngo_user = await db.users.find_one({"user_id": data.user_id}, {"_id": 0})
-        if ngo_user:
-            await send_verification_approved_email(
-                ngo_user.get("email"),
-                ngo_user.get("name"),
-                ngo_user.get("organization", "")
-            )
     
     volunteers = await db.users.find({"role": "volunteer"}, {"_id": 0}).to_list(1000)
     if volunteers:
@@ -684,6 +681,7 @@ async def get_my_donations(current_user: dict = Depends(get_current_user)):
     donations = await db.food_requests.find({"donor_id": current_user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return donations
 
+# Volunteer Endpoints
 @api_router.get("/volunteer/tasks", response_model=List[FoodRequest])
 async def get_volunteer_tasks(current_user: dict = Depends(get_current_user)):
     if current_user["role"] != "volunteer":
@@ -757,6 +755,7 @@ async def update_delivery_status(data: DeliveryStatusUpdate, current_user: dict 
     
     return {"message": "Status updated successfully"}
 
+# Admin Endpoints
 @api_router.get("/admin/pending-verifications")
 async def get_pending_verifications(current_user: dict = Depends(get_current_user)):
     if current_user["role"] != "admin":
@@ -787,6 +786,16 @@ async def verify_ngo(data: VerificationAction, current_user: dict = Depends(get_
         }}
     )
     
+    # Send approval email if verified
+    if data.action == "verified":
+        ngo_user = await db.users.find_one({"user_id": data.user_id}, {"_id": 0})
+        if ngo_user:
+            await send_verification_approved_email(
+                ngo_user.get("email"),
+                ngo_user.get("name"),
+                ngo_user.get("organization", "")
+            )
+    
     await log_audit("NGO_VERIFICATION", current_user["user_id"], {"ngo_user_id": data.user_id, "action": data.action})
     await sio.emit('verification_updated', {"user_id": data.user_id, "status": data.action})
     
@@ -808,6 +817,7 @@ async def get_audit_logs(current_user: dict = Depends(get_current_user), limit: 
     logs = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit).to_list(limit)
     return logs
 
+# Analytics Endpoints
 @api_router.get("/analytics/dashboard")
 async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
     total_requests = await db.food_requests.count_documents({})
@@ -855,6 +865,7 @@ async def get_trends(current_user: dict = Depends(get_current_user)):
     
     return {"trends": list(trends.values())}
 
+# Root Endpoints
 @app.get("/")
 async def root():
     return {
@@ -885,6 +896,7 @@ async def health_check():
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
+# Include router and middleware
 app.include_router(api_router)
 
 app.add_middleware(
@@ -901,4 +913,3 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
-
