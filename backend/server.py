@@ -18,6 +18,7 @@ import math
 import aiofiles
 import base64
 import asyncio
+import re
 from emergentintegrations.auth import create_google_login_url, exchange_code_for_session
 
 # Import our utility modules
@@ -913,3 +914,101 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+    
+class UserRegister(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+    role: str
+    location: str
+    phone: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    transport_mode: Optional[str] = None
+    organization: Optional[str] = None
+    donor_type: Optional[str] = None
+    availability_slots: Optional[List[str]] = None
+    
+    @validator('name')
+    def validate_name_field(cls, v):
+        if not v or len(v.strip()) == 0:
+            raise ValueError("Name is required")
+        if len(v.strip()) < 2:
+            raise ValueError("Name must be at least 2 characters")
+        return v.strip()
+    
+    @validator('role')
+    def validate_role_field(cls, v):
+        valid_roles = ['ngo', 'donor', 'volunteer', 'admin']
+        if v not in valid_roles:
+            raise ValueError(f"Role must be one of: {', '.join(valid_roles)}")
+        return v
+    
+    @validator('phone')
+    def validate_phone_number(cls, v):
+        if not v:
+            raise ValueError("Phone number is required")
+        
+        # Remove spaces, dashes, and parentheses
+        cleaned = re.sub(r'[\s\-\(\)]', '', v)
+        
+        # Check if exactly 10 digits
+        if not cleaned.isdigit():
+            raise ValueError("Phone number must contain only digits")
+        
+        if len(cleaned) != 10:
+            raise ValueError("Phone number must be exactly 10 digits")
+        
+        return cleaned
+    
+    @validator('password')
+    def validate_password_field(cls, v):
+        if not v:
+            raise ValueError("Password is required")
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters long")
+        return v
+    
+    @validator('location')
+    def validate_location_field(cls, v):
+        if not v or len(v.strip()) == 0:
+            raise ValueError("Location is required")
+        if len(v.strip()) < 3:
+            raise ValueError("Location must be at least 3 characters")
+        return v.strip()
+    
+    @validator('latitude')
+    def validate_lat(cls, v):
+        if v is not None:
+            if v < -90 or v > 90:
+                raise ValueError("Latitude must be between -90 and 90")
+        return v
+    
+    @validator('longitude')
+    def validate_lng(cls, v):
+        if v is not None:
+            if v < -180 or v > 180:
+                raise ValueError("Longitude must be between -180 and 180")
+        return v
+    
+    @validator('organization')
+    def validate_organization_field(cls, v, values):
+        role = values.get('role')
+        if role == 'ngo' and (not v or len(v.strip()) == 0):
+            raise ValueError("Organization name is required for NGOs")
+        return v.strip() if v else v
+    
+    @validator('donor_type')
+    def validate_donor_type_field(cls, v, values):
+        role = values.get('role')
+        if role == 'donor' and (not v or len(v.strip()) == 0):
+            raise ValueError("Donor type is required for donors")
+        return v
+    
+    @validator('transport_mode')
+    def validate_transport_mode_field(cls, v, values):
+        role = values.get('role')
+        if role == 'volunteer' and (not v or len(v.strip()) == 0):
+            raise ValueError("Transport mode is required for volunteers")
+        return v
+
