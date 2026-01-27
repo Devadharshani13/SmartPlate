@@ -113,6 +113,101 @@ class UserRegister(BaseModel):
             raise ValueError(result)
         return result
     
+    # Google OAuth Models
+class GoogleCallbackData(BaseModel):
+    code: str
+    role: str
+    location: str
+    phone: str
+    organization: Optional[str] = None
+    donor_type: Optional[str] = None
+    transport_mode: Optional[str] = None
+
+# Google OAuth Endpoints
+@api_router.get("/auth/google/login")
+async def google_login():
+    """Generate Google OAuth login URL"""
+    try:
+        redirect_uri = f"{os.environ.get('FRONTEND_URL', 'http://localhost:3000')}/auth/callback"
+        login_url = create_google_login_url(
+            redirect_uri=redirect_uri,
+            scopes=["email", "profile"]
+        )
+        return {"login_url": login_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create login URL: {str(e)}")
+
+@api_router.post("/auth/google/callback")
+async def google_callback(callback_data: GoogleCallbackData):
+    """Handle Google OAuth callback"""
+    try:
+        # Exchange code for session
+        session_data = exchange_code_for_session(
+            code=callback_data.code,
+            redirect_uri=f"{os.environ.get('FRONTEND_URL', 'http://localhost:3000')}/auth/callback"
+        )
+        
+        email = session_data.get('email')
+        name = session_data.get('name', email.split('@')[0])
+        
+        if not email:
+            raise HTTPException(status_code=400, detail="Failed to retrieve email from Google")
+        
+        # Check if user exists
+        existing_user = await db.users.find_one({"email": email}, {"_id": 0})
+        
+        if existing_user:
+            # User exists, log them in
+            token = create_access_token({"sub": existing_user["user_id"], "role": existing_user["role"]})
+            existing_user.pop("password", None)
+            return {"token": token, "user": existing_user}
+        
+        # Create new user
+        user_id = str(uuid.uuid4())
+        user_doc = {
+            "user_id": user_id,
+            "email": email,
+            "name": name,
+            "role": callback_data.role,
+            "location": callback_data.location,
+            "phone": callback_data.phone,
+            "auth_provider": "google",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Add role-specific fields
+        if callback_data.role == "volunteer" and callback_data.transport_mode:
+            user_doc["transport_mode"] = callback_data.transport_mode
+            user_doc["reliability_score"] = 5.0
+            user_doc["completed_tasks"] = 0
+            user_doc["availability_slots"] = []
+        
+        if callback_data.role == "ngo":
+            user_doc["verification_status"] = "pending"
+            user_doc["organization"] = callback_data.organization or ""
+            user_doc["verification_documents"] = []
+            user_doc["reliability_score"] = 5.0
+            user_doc["total_requests"] = 0
+            user_doc["completed_requests"] = 0
+        
+        if callback_data.role == "donor" and callback_data.donor_type:
+            user_doc["donor_type"] = callback_data.donor_type
+            user_doc["total_donations"] = 0
+        
+        await db.users.insert_one(user_doc)
+        await log_audit("USER_REGISTERED_GOOGLE", user_id, {"role": callback_data.role, "email": email})
+        
+        # Send welcome email
+        await send_welcome_email(email, name, callback_data.role)
+        
+        token = create_access_token({"sub": user_id, "role": callback_data.role})
+        user_response = {k: v for k, v in user_doc.items() if k not in ["password", "_id"]}
+        
+        return {"token": token, "user": user_response}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Google authentication failed: {str(e)}")
+        
     @validator('password')
     def validate_password_field(cls, v):
         is_valid, error = validate_password_strength(v)
@@ -316,6 +411,8 @@ async def register(user_data: UserRegister):
         user_doc["total_donations"] = 0
     
     await db.users.insert_one(user_doc)
+     # Send welcome email
+    await send_welcome_email(user_data.email, user_data.name, user_data.role)
     await log_audit("USER_REGISTERED", user_id, {"role": user_data.role, "email": user_data.email})
     
     token = create_access_token({"sub": user_id, "role": user_data.role})
@@ -512,6 +609,16 @@ async def accept_donation(data: DonationAccept, current_user: dict = Depends(get
     )
     
     await db.users.update_one({"user_id": current_user["user_id"]}, {"$inc": {"total_donations": 1}})
+
+    # Send approval email if verified
+    if data.action == "verified":
+        ngo_user = await db.users.find_one({"user_id": data.user_id}, {"_id": 0})
+        if ngo_user:
+            await send_verification_approved_email(
+                ngo_user.get("email"),
+                ngo_user.get("name"),
+                ngo_user.get("organization", "")
+            )
     
     volunteers = await db.users.find({"role": "volunteer"}, {"_id": 0}).to_list(1000)
     if volunteers:
@@ -794,3 +901,4 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
