@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { UtensilsCrossed, User, Mail, Lock, MapPin, Phone, Building2, Truck } from 'lucide-react';
+import { UtensilsCrossed, User, Mail, Lock, Phone, Building2, Truck } from 'lucide-react';
+import LocationAutocomplete from '../components/LocationAutocomplete';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -17,7 +18,9 @@ export default function Login({ onLogin }) {
     phone: '',
     organization: '',
     donor_type: '',
-    transport_mode: 'bicycle'
+    transport_mode: 'bicycle',
+    latitude: null,
+    longitude: null
   });
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -89,6 +92,19 @@ export default function Login({ onLogin }) {
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  const handlePlaceSelect = (locationData) => {
+    setFormData({
+      ...formData,
+      location: locationData.address,
+      latitude: locationData.latitude,
+      longitude: locationData.longitude
+    });
+
+    if (errors.location) {
+      setErrors({ ...errors, location: '' });
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -173,7 +189,9 @@ export default function Login({ onLogin }) {
         phone: formData.phone.replace(/[\s\-\(\)]/g, ''),
         organization: formData.organization,
         donor_type: formData.donor_type,
-        transport_mode: formData.transport_mode
+        transport_mode: formData.transport_mode,
+        latitude: formData.latitude,
+        longitude: formData.longitude
       }));
     }
 
@@ -316,20 +334,15 @@ export default function Login({ onLogin }) {
 
                   <div>
                     <label className="block text-sm font-medium text-[#1F2937] mb-2">Location *</label>
-                    <div className="relative">
-                      <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-[#9CA3AF]" />
-                      <input
-                        data-testid="location-input"
-                        type="text"
-                        name="location"
-                        value={formData.location}
-                        onChange={handleChange}
-                        placeholder="e.g., New York, NY"
-                        className={`w-full pl-10 pr-4 py-3 bg-white border ${errors.location ? 'border-red-500' : 'border-stone-200'} rounded-lg focus:outline-none focus:border-[#1A4D2E] focus:ring-2 focus:ring-[#1A4D2E] focus:ring-opacity-20 transition-all`}
-                        required
-                      />
-                    </div>
-                    {errors.location && <p className="text-red-500 text-sm mt-1">{errors.location}</p>}
+                    <LocationAutocomplete
+                      value={formData.location}
+                      onChange={handleChange}
+                      onPlaceSelect={handlePlaceSelect}
+                      placeholder="Start typing your address..."
+                      error={errors.location}
+                      required
+                      dataTestId="location-input"
+                    />
                   </div>
 
                   <div>
