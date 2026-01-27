@@ -1,5 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -7,7 +8,7 @@ import socketio
 import os
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, validator
 from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -16,6 +17,13 @@ from passlib.context import CryptContext
 import math
 import aiofiles
 import base64
+import asyncio
+from emergentintegrations.auth import create_google_login_url, exchange_code_for_session
+
+# Import our utility modules
+from email_service import send_welcome_email, send_verification_approved_email
+from validation import validate_phone, validate_email, validate_location, validate_latitude, validate_longitude, validate_password_strength
+from geo_utils import haversine_distance, sort_by_distance, get_distance_display
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -90,11 +98,50 @@ class UserRegister(BaseModel):
     name: str
     role: str
     location: str
-    phone: Optional[str] = None
+    phone: str  # Now required
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     transport_mode: Optional[str] = None
     organization: Optional[str] = None
     donor_type: Optional[str] = None
     availability_slots: Optional[List[str]] = None
+    
+    @validator('phone')
+    def validate_phone_number(cls, v):
+        is_valid, result = validate_phone(v)
+        if not is_valid:
+            raise ValueError(result)
+        return result
+    
+    @validator('password')
+    def validate_password_field(cls, v):
+        is_valid, error = validate_password_strength(v)
+        if not is_valid:
+            raise ValueError(error)
+        return v
+    
+    @validator('location')
+    def validate_location_field(cls, v):
+        is_valid, result = validate_location(v)
+        if not is_valid:
+            raise ValueError(result)
+        return result
+    
+    @validator('latitude')
+    def validate_lat(cls, v):
+        if v is not None:
+            is_valid, error = validate_latitude(v)
+            if not is_valid:
+                raise ValueError(error)
+        return v
+    
+    @validator('longitude')
+    def validate_lng(cls, v):
+        if v is not None:
+            is_valid, error = validate_longitude(v)
+            if not is_valid:
+                raise ValueError(error)
+        return v
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -155,6 +202,13 @@ class DonationAccept(BaseModel):
     request_id: str
     availability_time: str
     food_condition: str
+    can_deliver_self: bool = False  # NEW: Can donor deliver themselves?
+
+class PhotoProof(BaseModel):
+    image_base64: str
+    latitude: float
+    longitude: float
+    timestamp: Optional[str] = None
 
 class DeliveryTaskAccept(BaseModel):
     request_id: str
