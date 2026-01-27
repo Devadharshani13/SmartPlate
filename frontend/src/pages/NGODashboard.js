@@ -3,6 +3,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { UtensilsCrossed, LogOut, Plus, Users, TrendingUp, Package, Clock, MapPin, User, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
+import LocationAutocomplete from '../components/LocationAutocomplete';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -33,17 +34,19 @@ export default function NGODashboard({ user, onLogout }) {
   const [requests, setRequests] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [formData, setFormData] = useState({
-    food_type: 'vegetarian',
-    food_category: 'cooked',
-    quantity: '',
-    quantity_unit: 'people',
-    required_date: '',
-    required_time: '',
-    pickup_location: '',
-    special_instructions: '',
-    people_count: ''
-  });
+  const [formData, setFormData] = setFormData({
+  food_type: 'vegetarian',
+  food_category: 'cooked',
+  quantity: '',
+  quantity_unit: 'people',
+  required_date: '',
+  required_time: '',
+  pickup_location: '',
+  special_instructions: '',
+  people_count: '',
+  latitude: null,
+  longitude: null
+});
 
   useEffect(() => {
     fetchRequests();
@@ -99,6 +102,15 @@ export default function NGODashboard({ user, onLogout }) {
     inProgress: requests.filter(r => ['accepted_by_donor', 'assigned_to_volunteer', 'picked_up', 'in_transit', 'delivered'].includes(r.status)).length,
     completed: requests.filter(r => r.status === 'completed').length
   };
+  const handleLocationSelect = (locationData) => {
+  setFormData({
+    ...formData,
+    pickup_location: locationData.address,
+    latitude: locationData.latitude,
+    longitude: locationData.longitude
+  });
+};
+
 
   return (
     <div className="min-h-screen bg-[#F9F7F2]">
@@ -395,6 +407,17 @@ export default function NGODashboard({ user, onLogout }) {
                     required
                   />
                 </div>
+                <div>
+  <label className="block text-sm font-medium text-[#1F2937] mb-2">Pickup Location</label>
+  <LocationAutocomplete
+    value={formData.pickup_location}
+    onChange={(e) => setFormData({ ...formData, pickup_location: e.target.value })}
+    onPlaceSelect={handleLocationSelect}
+    placeholder="Start typing pickup address..."
+    required
+    dataTestId="pickup-location-input"
+  />
+</div>
 
                 <div>
                   <label className="block text-sm font-medium text-[#1F2937] mb-2">Required Time</label>
@@ -455,4 +478,5 @@ export default function NGODashboard({ user, onLogout }) {
       )}
     </div>
   );
+
 }
