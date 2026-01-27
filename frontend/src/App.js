@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import '@/App.css';
 import Login from './pages/Login';
+import AuthCallback from './pages/AuthCallback';
 import NGODashboard from './pages/NGODashboard';
 import DonorDashboard from './pages/DonorDashboard';
 import VolunteerDashboard from './pages/VolunteerDashboard';
@@ -80,6 +81,7 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={!user ? <Login onLogin={handleLogin} /> : <Navigate to={`/${user.role}`} />} />
+          <Route path="/auth/callback" element={<AuthCallback onLogin={handleLogin} />} />
           <Route path="/ngo" element={user && user.role === 'ngo' ? <NGODashboard user={user} onLogout={handleLogout} /> : <Navigate to="/login" />} />
           <Route path="/donor" element={user && user.role === 'donor' ? <DonorDashboard user={user} onLogout={handleLogout} /> : <Navigate to="/login" />} />
           <Route path="/volunteer" element={user && user.role === 'volunteer' ? <VolunteerDashboard user={user} onLogout={handleLogout} /> : <Navigate to="/login" />} />
