@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { UtensilsCrossed, User, Mail, Lock, Phone, Building2, Truck } from 'lucide-react';
+import { UtensilsCrossed, User, Mail, Lock, Phone, Building2, Truck, Upload, FileCheck } from 'lucide-react';
 import LocationAutocomplete from '../components/LocationAutocomplete';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -25,6 +25,9 @@ export default function Login({ onLogin }) {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errors, setErrors] = useState({});
+  const [idProofFile, setIdProofFile] = useState(null);
+  const [showIdUpload, setShowIdUpload] = useState(false);
+  const [uploadingId, setUploadingId] = useState(false);
 
   const validateEmail = (email) => {
     const re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -85,8 +88,13 @@ export default function Login({ onLogin }) {
         newErrors.donor_type = 'Donor type is required';
       }
 
-      if (formData.role === 'volunteer' && (!formData.transport_mode || formData.transport_mode.trim().length === 0)) {
-        newErrors.transport_mode = 'Transport mode is required';
+      if (formData.role === 'volunteer') {
+        if (!formData.transport_mode || formData.transport_mode.trim().length === 0) {
+          newErrors.transport_mode = 'Transport mode is required';
+        }
+        if (!idProofFile) {
+          newErrors.idProof = 'ID proof is required for volunteers';
+        }
       }
     }
 
@@ -104,6 +112,53 @@ export default function Login({ onLogin }) {
 
     if (errors.location) {
       setErrors({ ...errors, location: '' });
+    }
+  };
+
+  const handleIdProofChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validate file type
+      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
+      if (!allowedTypes.includes(file.type)) {
+        toast.error('Please upload a valid ID proof (JPG, PNG, or PDF)');
+        return;
+      }
+      
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('File size must be less than 5MB');
+        return;
+      }
+
+      setIdProofFile(file);
+      if (errors.idProof) {
+        setErrors({ ...errors, idProof: '' });
+      }
+    }
+  };
+
+  const uploadIdProof = async (token) => {
+    if (!idProofFile) return;
+
+    setUploadingId(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', idProofFile);
+
+      await axios.post(`${API}/volunteer/upload-id`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      toast.success('ID proof uploaded successfully!');
+    } catch (error) {
+      toast.error('Failed to upload ID proof');
+      console.error(error);
+    } finally {
+      setUploadingId(false);
     }
   };
 
@@ -129,6 +184,12 @@ export default function Login({ onLogin }) {
           };
 
       const response = await axios.post(endpoint, payload);
+      
+      // If volunteer and registering, upload ID proof
+      if (!isLogin && formData.role === 'volunteer' && idProofFile) {
+        await uploadIdProof(response.data.token);
+      }
+
       toast.success(isLogin ? 'Login successful!' : 'Registration successful!');
       onLogin(response.data.token, response.data.user);
     } catch (error) {
@@ -175,14 +236,18 @@ export default function Login({ onLogin }) {
         newErrors.donor_type = 'Donor type is required';
       }
 
+      if (formData.role === 'volunteer' && !idProofFile) {
+        newErrors.idProof = 'ID proof is required for volunteers';
+      }
+
       setErrors(newErrors);
       
       if (Object.keys(newErrors).length > 0) {
-        toast.error('Please fill in Role, Location, and Phone before signing in with Google');
+        toast.error('Please fill in all required fields before signing in with Google');
         return;
       }
       
-      // Store registration data in sessionStorage for callback
+      // Store registration data and ID proof file in sessionStorage for callback
       sessionStorage.setItem('google_registration_data', JSON.stringify({
         role: formData.role,
         location: formData.location.trim(),
@@ -193,6 +258,11 @@ export default function Login({ onLogin }) {
         latitude: formData.latitude,
         longitude: formData.longitude
       }));
+
+      // Note: ID proof file needs to be uploaded after callback
+      if (idProofFile) {
+        sessionStorage.setItem('has_id_proof', 'true');
+      }
     }
 
     setGoogleLoading(true);
@@ -405,27 +475,65 @@ export default function Login({ onLogin }) {
                   )}
 
                   {formData.role === 'volunteer' && (
-                    <div>
-                      <label className="block text-sm font-medium text-[#1F2937] mb-2">Transport Mode *</label>
-                      <div className="relative">
-                        <Truck className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-[#9CA3AF]" />
-                        <select
-                          data-testid="transport-mode-select"
-                          name="transport_mode"
-                          value={formData.transport_mode}
-                          onChange={handleChange}
-                          className={`w-full pl-10 pr-4 py-3 bg-white border ${errors.transport_mode ? 'border-red-500' : 'border-stone-200'} rounded-lg focus:outline-none focus:border-[#1A4D2E] focus:ring-2 focus:ring-[#1A4D2E] focus:ring-opacity-20 transition-all`}
-                          required
-                        >
-                          <option value="on_foot">On Foot</option>
-                          <option value="bicycle">Bicycle</option>
-                          <option value="two_wheeler">Two Wheeler</option>
-                          <option value="car">Car</option>
-                          <option value="van">Van</option>
-                        </select>
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-[#1F2937] mb-2">Transport Mode *</label>
+                        <div className="relative">
+                          <Truck className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-[#9CA3AF]" />
+                          <select
+                            data-testid="transport-mode-select"
+                            name="transport_mode"
+                            value={formData.transport_mode}
+                            onChange={handleChange}
+                            className={`w-full pl-10 pr-4 py-3 bg-white border ${errors.transport_mode ? 'border-red-500' : 'border-stone-200'} rounded-lg focus:outline-none focus:border-[#1A4D2E] focus:ring-2 focus:ring-[#1A4D2E] focus:ring-opacity-20 transition-all`}
+                            required
+                          >
+                            <option value="on_foot">On Foot</option>
+                            <option value="bicycle">Bicycle</option>
+                            <option value="two_wheeler">Two Wheeler</option>
+                            <option value="car">Car</option>
+                            <option value="van">Van</option>
+                          </select>
+                        </div>
+                        {errors.transport_mode && <p className="text-red-500 text-sm mt-1">{errors.transport_mode}</p>}
                       </div>
-                      {errors.transport_mode && <p className="text-red-500 text-sm mt-1">{errors.transport_mode}</p>}
-                    </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-[#1F2937] mb-2">
+                          ID Proof (Government ID/License) *
+                        </label>
+                        <div className="relative">
+                          <input
+                            data-testid="id-proof-input"
+                            type="file"
+                            accept=".jpg,.jpeg,.png,.pdf"
+                            onChange={handleIdProofChange}
+                            className="hidden"
+                            id="id-proof-upload"
+                          />
+                          <label
+                            htmlFor="id-proof-upload"
+                            className={`flex items-center justify-center w-full px-4 py-3 border-2 border-dashed ${
+                              errors.idProof ? 'border-red-500' : 'border-stone-300'
+                            } rounded-lg cursor-pointer hover:border-[#1A4D2E] transition-all bg-white`}
+                          >
+                            {idProofFile ? (
+                              <div className="flex items-center text-green-600">
+                                <FileCheck className="w-5 h-5 mr-2" />
+                                <span className="text-sm">{idProofFile.name}</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center text-[#9CA3AF]">
+                                <Upload className="w-5 h-5 mr-2" />
+                                <span className="text-sm">Upload ID Proof (JPG, PNG, or PDF)</span>
+                              </div>
+                            )}
+                          </label>
+                        </div>
+                        {errors.idProof && <p className="text-red-500 text-sm mt-1">{errors.idProof}</p>}
+                        <p className="text-xs text-[#9CA3AF] mt-1">Required for volunteer verification</p>
+                      </div>
+                    </>
                   )}
                 </>
               )}
@@ -433,10 +541,10 @@ export default function Login({ onLogin }) {
               <button
                 data-testid="submit-button"
                 type="submit"
-                disabled={loading}
+                disabled={loading || uploadingId}
                 className="w-full bg-[#1A4D2E] hover:bg-[#143d24] text-white rounded-full px-8 py-3 font-semibold shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? 'Please wait...' : isLogin ? 'Sign In' : 'Create Account'}
+                {loading || uploadingId ? 'Please wait...' : isLogin ? 'Sign In' : 'Create Account'}
               </button>
             </form>
 
@@ -470,6 +578,7 @@ export default function Login({ onLogin }) {
                 onClick={() => {
                   setIsLogin(!isLogin);
                   setErrors({});
+                  setIdProofFile(null);
                 }}
                 className="text-[#1A4D2E] hover:text-[#143d24] font-medium transition-colors"
               >
