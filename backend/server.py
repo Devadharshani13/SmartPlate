@@ -1,10 +1,9 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-import socketio
 import os
 import logging
 from pathlib import Path
@@ -19,10 +18,16 @@ import aiofiles
 import base64
 import asyncio
 import re
-from emergentintegrations.auth import create_google_login_url, exchange_code_for_session
+
+try:
+    from emergentintegrations.auth import create_google_login_url, exchange_code_for_session
+    GOOGLE_AUTH_AVAILABLE = True
+except ImportError:
+    GOOGLE_AUTH_AVAILABLE = False
+    print("Warning: emergentintegrations not available. Google OAuth will be disabled.")
 
 # Import our utility modules
-from email_service import send_welcome_email, send_verification_approved_email
+from email_service import send_welcome_email, send_verification_approved_email, send_volunteer_verification_approved_email
 from validation import validate_phone, validate_email, validate_location, validate_latitude, validate_longitude, validate_password_strength
 from geo_utils import haversine_distance, sort_by_distance, get_distance_display
 
@@ -50,9 +55,6 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
-
-sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
-socket_app = socketio.ASGIApp(sio, app)
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
@@ -108,6 +110,21 @@ class UserRegister(BaseModel):
     donor_type: Optional[str] = None
     availability_slots: Optional[List[str]] = None
     
+    @validator('name')
+    def validate_name_field(cls, v):
+        if not v or len(v.strip()) == 0:
+            raise ValueError("Name is required")
+        if len(v.strip()) < 2:
+            raise ValueError("Name must be at least 2 characters")
+        return v.strip()
+    
+    @validator('role')
+    def validate_role_field(cls, v):
+        valid_roles = ['ngo', 'donor', 'volunteer', 'admin']
+        if v not in valid_roles:
+            raise ValueError(f"Role must be one of: {', '.join(valid_roles)}")
+        return v
+    
     @validator('phone')
     def validate_phone_number(cls, v):
         is_valid, result = validate_phone(v)
@@ -143,6 +160,27 @@ class UserRegister(BaseModel):
             is_valid, error = validate_longitude(v)
             if not is_valid:
                 raise ValueError(error)
+        return v
+    
+    @validator('organization')
+    def validate_organization_field(cls, v, values):
+        role = values.get('role')
+        if role == 'ngo' and (not v or len(v.strip()) == 0):
+            raise ValueError("Organization name is required for NGOs")
+        return v.strip() if v else v
+    
+    @validator('donor_type')
+    def validate_donor_type_field(cls, v, values):
+        role = values.get('role')
+        if role == 'donor' and (not v or len(v.strip()) == 0):
+            raise ValueError("Donor type is required for donors")
+        return v
+    
+    @validator('transport_mode')
+    def validate_transport_mode_field(cls, v, values):
+        role = values.get('role')
+        if role == 'volunteer' and (not v or len(v.strip()) == 0):
+            raise ValueError("Transport mode is required for volunteers")
         return v
 
 class GoogleCallbackData(BaseModel):
@@ -281,19 +319,13 @@ def should_auto_trigger_extra_volunteer(quantity: int, distance: float, transpor
             return True, "capacity_constraint"
     return False, None
 
-# Socket.IO Events
-@sio.event
-async def connect(sid, environ):
-    print(f"Client connected: {sid}")
-
-@sio.event
-async def disconnect(sid):
-    print(f"Client disconnected: {sid}")
-
 # Google OAuth Endpoints
 @api_router.get("/auth/google/login")
 async def google_login():
     """Generate Google OAuth login URL"""
+    if not GOOGLE_AUTH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Google OAuth is not available")
+    
     try:
         redirect_uri = f"{os.environ.get('FRONTEND_URL', 'http://localhost:3000')}/auth/callback"
         login_url = create_google_login_url(
@@ -307,6 +339,9 @@ async def google_login():
 @api_router.post("/auth/google/callback")
 async def google_callback(callback_data: GoogleCallbackData):
     """Handle Google OAuth callback"""
+    if not GOOGLE_AUTH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Google OAuth is not available")
+    
     try:
         # Exchange code for session
         session_data = exchange_code_for_session(
@@ -348,6 +383,8 @@ async def google_callback(callback_data: GoogleCallbackData):
             user_doc["reliability_score"] = 5.0
             user_doc["completed_tasks"] = 0
             user_doc["availability_slots"] = []
+            user_doc["verification_status"] = "pending"  # Volunteers need ID verification
+            user_doc["id_proof_url"] = None
         
         if callback_data.role == "ngo":
             user_doc["verification_status"] = "pending"
@@ -401,6 +438,8 @@ async def register(user_data: UserRegister):
         user_doc["reliability_score"] = 5.0
         user_doc["completed_tasks"] = 0
         user_doc["availability_slots"] = user_data.availability_slots or []
+        user_doc["verification_status"] = "pending"  # Volunteers need ID verification
+        user_doc["id_proof_url"] = None
     
     if user_data.role == "ngo":
         user_doc["verification_status"] = "pending"
@@ -517,7 +556,7 @@ async def create_food_request(request_data: FoodRequestCreate, current_user: dic
     await db.users.update_one({"user_id": current_user["user_id"]}, {"$inc": {"total_requests": 1}})
     await log_audit("FOOD_REQUEST_CREATED", current_user["user_id"], {"request_id": request_id, "people_count": request_data.people_count})
     
-    await sio.emit('new_request', request_doc)
+    logger.info(f"New food request created: {request_id}")
     
     return FoodRequest(**request_doc)
 
@@ -580,7 +619,7 @@ async def confirm_receipt(data: ConfirmReceipt, current_user: dict = Depends(get
         )
     
     await log_audit("RECEIPT_CONFIRMED", current_user["user_id"], {"request_id": data.request_id})
-    await sio.emit('request_completed', {"request_id": data.request_id})
+    logger.info(f"Receipt confirmed for request: {data.request_id}")
     
     return {"message": "Receipt confirmed successfully"}
 
@@ -618,7 +657,8 @@ async def accept_donation(data: DonationAccept, current_user: dict = Depends(get
     
     await db.users.update_one({"user_id": current_user["user_id"]}, {"$inc": {"total_donations": 1}})
     
-    volunteers = await db.users.find({"role": "volunteer"}, {"_id": 0}).to_list(1000)
+    # Only assign to verified volunteers
+    volunteers = await db.users.find({"role": "volunteer", "verification_status": "verified"}, {"_id": 0}).to_list(1000)
     if volunteers:
         best_volunteer = None
         best_score = -1
@@ -670,7 +710,7 @@ async def accept_donation(data: DonationAccept, current_user: dict = Depends(get
                     )
     
     await log_audit("DONATION_ACCEPTED", current_user["user_id"], {"request_id": data.request_id})
-    await sio.emit('request_status_changed', {"request_id": data.request_id, "status": "accepted_by_donor"})
+    logger.info(f"Donation accepted for request: {data.request_id}")
     
     return {"message": "Donation accepted successfully"}
 
@@ -683,10 +723,54 @@ async def get_my_donations(current_user: dict = Depends(get_current_user)):
     return donations
 
 # Volunteer Endpoints
+@api_router.post("/volunteer/upload-id")
+async def upload_volunteer_id(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    """Upload volunteer ID proof for verification"""
+    if current_user["role"] != "volunteer":
+        raise HTTPException(status_code=403, detail="Only volunteers can upload ID proof")
+    
+    # Validate file type
+    allowed_extensions = ['jpg', 'jpeg', 'png', 'pdf']
+    file_ext = file.filename.split('.')[-1].lower()
+    if file_ext not in allowed_extensions:
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}")
+    
+    # Create directory if it doesn't exist
+    upload_dir = "/app/uploads/volunteer_ids"
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    # Generate unique filename
+    file_id = str(uuid.uuid4())
+    file_path = f"{upload_dir}/{file_id}.{file_ext}"
+    
+    # Save file
+    content = await file.read()
+    async with aiofiles.open(file_path, 'wb') as f:
+        await f.write(content)
+    
+    # Update user record
+    await db.users.update_one(
+        {"user_id": current_user["user_id"]},
+        {"$set": {
+            "id_proof_url": file_path,
+            "id_proof_filename": file.filename,
+            "id_proof_uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "verification_status": "pending"
+        }}
+    )
+    
+    await log_audit("VOLUNTEER_ID_UPLOADED", current_user["user_id"], {"filename": file.filename})
+    
+    return {"message": "ID proof uploaded successfully. Awaiting admin verification.", "file_id": file_id}
+
 @api_router.get("/volunteer/tasks", response_model=List[FoodRequest])
 async def get_volunteer_tasks(current_user: dict = Depends(get_current_user)):
     if current_user["role"] != "volunteer":
         raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Check if volunteer is verified
+    if current_user.get("verification_status") != "verified":
+        raise HTTPException(status_code=403, detail="Only verified volunteers can view tasks. Please upload your ID proof and wait for admin approval.")
     
     available_tasks = await db.food_requests.find(
         {"$or": [
@@ -711,6 +795,10 @@ async def update_delivery_status(data: DeliveryStatusUpdate, current_user: dict 
     if current_user["role"] != "volunteer":
         raise HTTPException(status_code=403, detail="Access denied")
     
+    # Check if volunteer is verified
+    if current_user.get("verification_status") != "verified":
+        raise HTTPException(status_code=403, detail="Only verified volunteers can update delivery status.")
+    
     request = await db.food_requests.find_one({"request_id": data.request_id})
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
@@ -728,7 +816,7 @@ async def update_delivery_status(data: DeliveryStatusUpdate, current_user: dict 
     
     if data.extra_volunteer_required and not request.get("co_volunteer_id"):
         volunteers = await db.users.find(
-            {"role": "volunteer", "user_id": {"$ne": current_user["user_id"]}},
+            {"role": "volunteer", "user_id": {"$ne": current_user["user_id"]}, "verification_status": "verified"},
             {"_id": 0}
         ).to_list(1000)
         
@@ -752,7 +840,7 @@ async def update_delivery_status(data: DeliveryStatusUpdate, current_user: dict 
     
     await db.food_requests.update_one({"request_id": data.request_id}, {"$set": update_data})
     await log_audit("DELIVERY_STATUS_UPDATED", current_user["user_id"], {"request_id": data.request_id, "status": data.status})
-    await sio.emit('request_status_changed', {"request_id": data.request_id, "status": data.status})
+    logger.info(f"Delivery status updated for request: {data.request_id} to {data.status}")
     
     return {"message": "Status updated successfully"}
 
@@ -768,6 +856,35 @@ async def get_pending_verifications(current_user: dict = Depends(get_current_use
     ).to_list(1000)
     
     return pending_ngos
+
+@api_router.get("/admin/pending-volunteers")
+async def get_pending_volunteers(current_user: dict = Depends(get_current_user)):
+    """Get all volunteers pending verification"""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    pending_volunteers = await db.users.find(
+        {"role": "volunteer", "verification_status": "pending"},
+        {"_id": 0, "password": 0}
+    ).to_list(1000)
+    
+    return pending_volunteers
+
+@api_router.get("/admin/volunteer-id/{user_id}")
+async def get_volunteer_id_proof(user_id: str, current_user: dict = Depends(get_current_user)):
+    """Get volunteer ID proof file"""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    volunteer = await db.users.find_one({"user_id": user_id, "role": "volunteer"}, {"_id": 0})
+    if not volunteer:
+        raise HTTPException(status_code=404, detail="Volunteer not found")
+    
+    id_proof_path = volunteer.get("id_proof_url")
+    if not id_proof_path or not os.path.exists(id_proof_path):
+        raise HTTPException(status_code=404, detail="ID proof not found")
+    
+    return FileResponse(id_proof_path)
 
 @api_router.post("/admin/verify-ngo")
 async def verify_ngo(data: VerificationAction, current_user: dict = Depends(get_current_user)):
@@ -798,9 +915,42 @@ async def verify_ngo(data: VerificationAction, current_user: dict = Depends(get_
             )
     
     await log_audit("NGO_VERIFICATION", current_user["user_id"], {"ngo_user_id": data.user_id, "action": data.action})
-    await sio.emit('verification_updated', {"user_id": data.user_id, "status": data.action})
+    logger.info(f"NGO verification: {data.user_id} - {data.action}")
     
     return {"message": f"NGO {data.action} successfully"}
+
+@api_router.post("/admin/verify-volunteer")
+async def verify_volunteer(data: VerificationAction, current_user: dict = Depends(get_current_user)):
+    """Verify or reject volunteer"""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    if data.action not in ["verified", "rejected"]:
+        raise HTTPException(status_code=400, detail="Invalid action")
+    
+    await db.users.update_one(
+        {"user_id": data.user_id},
+        {"$set": {
+            "verification_status": data.action,
+            "verification_notes": data.notes,
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+            "verified_by": current_user["user_id"]
+        }}
+    )
+    
+    # Send approval email if verified
+    if data.action == "verified":
+        volunteer_user = await db.users.find_one({"user_id": data.user_id}, {"_id": 0})
+        if volunteer_user:
+            await send_volunteer_verification_approved_email(
+                volunteer_user.get("email"),
+                volunteer_user.get("name")
+            )
+    
+    await log_audit("VOLUNTEER_VERIFICATION", current_user["user_id"], {"volunteer_user_id": data.user_id, "action": data.action})
+    logger.info(f"Volunteer verification: {data.user_id} - {data.action}")
+    
+    return {"message": f"Volunteer {data.action} successfully"}
 
 @api_router.get("/admin/users")
 async def get_all_users(current_user: dict = Depends(get_current_user)):
@@ -914,101 +1064,3 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
-    
-class UserRegister(BaseModel):
-    email: EmailStr
-    password: str
-    name: str
-    role: str
-    location: str
-    phone: str
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-    transport_mode: Optional[str] = None
-    organization: Optional[str] = None
-    donor_type: Optional[str] = None
-    availability_slots: Optional[List[str]] = None
-    
-    @validator('name')
-    def validate_name_field(cls, v):
-        if not v or len(v.strip()) == 0:
-            raise ValueError("Name is required")
-        if len(v.strip()) < 2:
-            raise ValueError("Name must be at least 2 characters")
-        return v.strip()
-    
-    @validator('role')
-    def validate_role_field(cls, v):
-        valid_roles = ['ngo', 'donor', 'volunteer', 'admin']
-        if v not in valid_roles:
-            raise ValueError(f"Role must be one of: {', '.join(valid_roles)}")
-        return v
-    
-    @validator('phone')
-    def validate_phone_number(cls, v):
-        if not v:
-            raise ValueError("Phone number is required")
-        
-        # Remove spaces, dashes, and parentheses
-        cleaned = re.sub(r'[\s\-\(\)]', '', v)
-        
-        # Check if exactly 10 digits
-        if not cleaned.isdigit():
-            raise ValueError("Phone number must contain only digits")
-        
-        if len(cleaned) != 10:
-            raise ValueError("Phone number must be exactly 10 digits")
-        
-        return cleaned
-    
-    @validator('password')
-    def validate_password_field(cls, v):
-        if not v:
-            raise ValueError("Password is required")
-        if len(v) < 6:
-            raise ValueError("Password must be at least 6 characters long")
-        return v
-    
-    @validator('location')
-    def validate_location_field(cls, v):
-        if not v or len(v.strip()) == 0:
-            raise ValueError("Location is required")
-        if len(v.strip()) < 3:
-            raise ValueError("Location must be at least 3 characters")
-        return v.strip()
-    
-    @validator('latitude')
-    def validate_lat(cls, v):
-        if v is not None:
-            if v < -90 or v > 90:
-                raise ValueError("Latitude must be between -90 and 90")
-        return v
-    
-    @validator('longitude')
-    def validate_lng(cls, v):
-        if v is not None:
-            if v < -180 or v > 180:
-                raise ValueError("Longitude must be between -180 and 180")
-        return v
-    
-    @validator('organization')
-    def validate_organization_field(cls, v, values):
-        role = values.get('role')
-        if role == 'ngo' and (not v or len(v.strip()) == 0):
-            raise ValueError("Organization name is required for NGOs")
-        return v.strip() if v else v
-    
-    @validator('donor_type')
-    def validate_donor_type_field(cls, v, values):
-        role = values.get('role')
-        if role == 'donor' and (not v or len(v.strip()) == 0):
-            raise ValueError("Donor type is required for donors")
-        return v
-    
-    @validator('transport_mode')
-    def validate_transport_mode_field(cls, v, values):
-        role = values.get('role')
-        if role == 'volunteer' and (not v or len(v.strip()) == 0):
-            raise ValueError("Transport mode is required for volunteers")
-        return v
-
